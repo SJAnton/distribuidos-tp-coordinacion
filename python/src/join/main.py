@@ -1,5 +1,6 @@
 import os
 import logging
+import signal
 
 from common import middleware, message_protocol, fruit_item
 
@@ -16,12 +17,20 @@ TOP_SIZE = int(os.environ["TOP_SIZE"])
 class JoinFilter:
 
     def __init__(self):
+        self._prev_sigterm_handler = signal.signal(signal.SIGTERM, self.handle_sigterm)
         self.input_queue = middleware.MessageMiddlewareQueueRabbitMQ(
             MOM_HOST, INPUT_QUEUE
         )
         self.output_queue = middleware.MessageMiddlewareQueueRabbitMQ(
             MOM_HOST, OUTPUT_QUEUE
         )
+
+    def handle_sigterm(self, signum, frame):
+        logging.info("Received SIGTERM signal")
+        self.input_queue.stop_consuming()
+
+        if self._prev_sigterm_handler:
+            self._prev_sigterm_handler(signum, frame)
 
     def process_messsage(self, message, ack, nack):
         logging.info("Received top")
@@ -32,12 +41,22 @@ class JoinFilter:
     def start(self):
         self.input_queue.start_consuming(self.process_messsage)
 
+    def close(self):
+        self.input_queue.close()
+        self.output_queue.close()
 
 def main():
     logging.basicConfig(level=logging.INFO)
     join_filter = JoinFilter()
-    join_filter.start()
-
+    try:
+        join_filter.start()
+        join_filter.close()
+    except middleware.MessageMiddlewareDisconnectedError:
+        logging.error("Connection with middleware was lost")
+        return 1
+    except Exception as e:
+        logging.error(e)
+        return 2
     return 0
 
 
