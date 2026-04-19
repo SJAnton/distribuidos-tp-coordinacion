@@ -26,6 +26,7 @@ class AggregationFilter:
             MOM_HOST, OUTPUT_QUEUE
         )
         self.fruit_top_by_client = {}
+        self.eof_counter_by_client = {}
 
     def handle_sigterm(self, signum, frame):
         logging.info("Received SIGTERM signal")
@@ -39,14 +40,20 @@ class AggregationFilter:
         fruit_top = self.fruit_top_by_client.setdefault(client_id, [])
         for i in range(len(fruit_top)):
             if fruit_top[i].fruit == fruit:
-                fruit_top[i] = fruit_top[i] + fruit_item.FruitItem(
+                addition = fruit_top[i] + fruit_item.FruitItem(
                     fruit, amount
                 )
+                fruit_top.pop(i)
+                bisect.insort(fruit_top, addition)
                 return
         bisect.insort(fruit_top, fruit_item.FruitItem(fruit, amount))
 
     def _process_eof(self, client_id):
-        logging.info("Received EOF")
+        eof_counter = self.eof_counter_by_client.get(client_id, 0) + 1
+        self.eof_counter_by_client[client_id] = eof_counter
+        if eof_counter < SUM_AMOUNT:
+            return
+        logging.info(f"Received EOF from all sum nodes for client {client_id}")
         fruit_top = self.fruit_top_by_client.get(client_id, [])
         fruit_chunk = list(fruit_top[-TOP_SIZE:])
         fruit_chunk.reverse()
@@ -59,6 +66,8 @@ class AggregationFilter:
         self.output_queue.send(message_protocol.internal.serialize([total_fruit_top, client_id]))
         if client_id in self.fruit_top_by_client:
             del self.fruit_top_by_client[client_id]
+        if client_id in self.eof_counter_by_client:
+            del self.eof_counter_by_client[client_id]
 
     def process_messsage(self, message, ack, nack):
         logging.info("Process message")

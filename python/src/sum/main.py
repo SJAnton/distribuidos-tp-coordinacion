@@ -28,9 +28,20 @@ class SumFilter:
             self.data_output_exchanges.append(data_output_exchange)
         self.amount_by_client = {}
 
+        self.eof_input_queue = middleware.MessageMiddlewareQueueRabbitMQ(
+            MOM_HOST, f"{SUM_PREFIX}_{ID}"
+        )
+        self.eof_output_queues = []
+        for j in range(SUM_AMOUNT):
+            eof_output_queue = middleware.MessageMiddlewareQueueRabbitMQ(
+                MOM_HOST, f"{SUM_PREFIX}_{j}"
+            )
+            self.eof_output_queues.append(eof_output_queue)
+        
     def handle_sigterm(self, signum, frame):
         logging.info("Received SIGTERM signal")
         self.input_queue.stop_consuming()
+        self.eof_input_queue.stop_consuming()
 
         if self._prev_sigterm_handler:
             self._prev_sigterm_handler(signum, frame)
@@ -63,16 +74,34 @@ class SumFilter:
         if len(fields) == 3:
             self._process_data(*fields)
         else:
-            self._process_eof(*fields)
+            logging.info("Sending EOF message to the other sum nodes")
+            for eof_output_queue in self.eof_output_queues:
+                eof_output_queue.send(
+                    message_protocol.internal.serialize(fields)
+                )
+        ack()
+
+    def process_eof_message(self, message, ack, nack):
+        fields = message_protocol.internal.deserialize(message)
+        self._process_eof(*fields)
         ack()
 
     def start(self):
+        eof_handler_thread = threading.Thread(
+            target=self.eof_input_queue.start_consuming,
+            args=(self.process_eof_message,),
+        )
+        eof_handler_thread.start()
         self.input_queue.start_consuming(self.process_data_messsage)
+        eof_handler_thread.join()
 
     def close(self):
         self.input_queue.close()
+        self.eof_input_queue.close()
         for data_output_exchange in self.data_output_exchanges:
             data_output_exchange.close()
+        for eof_output_queue in self.eof_output_queues:
+            eof_output_queue.close()
 
 def main():
     logging.basicConfig(level=logging.INFO)
