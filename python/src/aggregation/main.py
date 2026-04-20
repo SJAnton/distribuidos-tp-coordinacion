@@ -70,13 +70,17 @@ class AggregationFilter:
             del self.eof_counter_by_client[client_id]
 
     def process_messsage(self, message, ack, nack):
-        logging.info("Process message")
-        fields = message_protocol.internal.deserialize(message)
-        if len(fields) == 3:
-            self._process_data(*fields)
-        else:
-            self._process_eof(*fields)
-        ack()
+        try:
+            fields = message_protocol.internal.deserialize(message)
+            logging.info("Processing message")
+            if len(fields) == 3:
+                self._process_data(*fields)
+            else:
+                self._process_eof(*fields)
+            ack()
+        except Exception as e:
+            logging.error(f"Error processing message: {e}")
+            nack()
 
     def start(self):
         self.input_exchange.start_consuming(self.process_messsage)
@@ -90,13 +94,17 @@ def main():
     aggregation_filter = AggregationFilter()
     try:
         aggregation_filter.start()
-        aggregation_filter.close()
     except middleware.MessageMiddlewareDisconnectedError:
         logging.error("Connection with middleware was lost")
         return 1
     except Exception as e:
         logging.error(e)
         return 2
+    finally:
+        try:
+            aggregation_filter.close()
+        except Exception as e:
+            logging.error(f"Error during close: {e}")
     return 0
 
 

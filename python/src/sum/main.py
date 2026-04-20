@@ -80,21 +80,29 @@ class SumFilter:
 
 
     def process_data_messsage(self, message, ack, nack):
-        fields = message_protocol.internal.deserialize(message)
-        if len(fields) == 3:
-            self._process_data(*fields)
-        else:
-            logging.info("Sending EOF message to the other sum nodes")
-            for eof_output_queue in self.eof_output_queues:
-                eof_output_queue.send(
-                    message_protocol.internal.serialize(fields)
-                )
-        ack()
+        try:
+            fields = message_protocol.internal.deserialize(message)
+            if len(fields) == 3:
+                self._process_data(*fields)
+            else:
+                logging.info("Sending EOF message to the other sum nodes")
+                for eof_output_queue in self.eof_output_queues:
+                    eof_output_queue.send(
+                        message_protocol.internal.serialize(fields)
+                    )
+            ack()
+        except Exception as e:
+            logging.error(f"Error processing message: {e}")
+            nack()
 
     def process_eof_message(self, message, ack, nack):
-        fields = message_protocol.internal.deserialize(message)
-        self._process_eof(*fields)
-        ack()
+        try:
+            fields = message_protocol.internal.deserialize(message)
+            self._process_eof(*fields)
+            ack()
+        except Exception as e:
+            logging.error(f"Error processing message: {e}")
+            nack()
 
     def start(self):
         eof_handler_thread = threading.Thread(
@@ -118,13 +126,17 @@ def main():
     sum_filter = SumFilter()
     try:
         sum_filter.start()
-        sum_filter.close()
     except middleware.MessageMiddlewareDisconnectedError:
         logging.error("Connection with middleware was lost")
         return 1
     except Exception as e:
         logging.error(e)
         return 2
+    finally:
+        try:
+            sum_filter.close()
+        except Exception as e:
+            logging.error(f"Error during close: {e}")
     return 0
 
 

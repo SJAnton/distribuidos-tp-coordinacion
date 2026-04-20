@@ -35,22 +35,26 @@ class JoinFilter:
             self._prev_sigterm_handler(signum, frame)
 
     def process_messsage(self, message, ack, nack):
-        [fruit_top, client_id] = message_protocol.internal.deserialize(message)
-        top_by_client = self.tops_by_client.setdefault(client_id, [])
-        top_by_client.extend(fruit_top)
+        try:
+            [fruit_top, client_id] = message_protocol.internal.deserialize(message)
+            top_by_client = self.tops_by_client.setdefault(client_id, [])
+            top_by_client.extend(fruit_top)
 
-        counter = self.done_aggregations_by_client.get(client_id, 0) + 1
-        self.done_aggregations_by_client[client_id] = counter
+            counter = self.done_aggregations_by_client.get(client_id, 0) + 1
+            self.done_aggregations_by_client[client_id] = counter
 
-        if counter == AGGREGATION_AMOUNT:
-            logging.info(f"Sending top {TOP_SIZE} to client {client_id}")
-            top_n = sorted(top_by_client, key=lambda x: x[1], reverse=True)[:TOP_SIZE]
-            self.output_queue.send(message_protocol.internal.serialize([top_n, client_id]))
-            if client_id in self.tops_by_client:
-                del self.tops_by_client[client_id]
-            if client_id in self.done_aggregations_by_client:
-                del self.done_aggregations_by_client[client_id]
-        ack()
+            if counter == AGGREGATION_AMOUNT:
+                logging.info(f"Sending top {TOP_SIZE} to client {client_id}")
+                top_n = sorted(top_by_client, key=lambda x: x[1], reverse=True)[:TOP_SIZE]
+                self.output_queue.send(message_protocol.internal.serialize([top_n, client_id]))
+                if client_id in self.tops_by_client:
+                    del self.tops_by_client[client_id]
+                if client_id in self.done_aggregations_by_client:
+                    del self.done_aggregations_by_client[client_id]
+            ack()
+        except Exception as e:
+            logging.error(f"Error processing message: {e}")
+            nack()
 
     def start(self):
         self.input_queue.start_consuming(self.process_messsage)
@@ -64,13 +68,17 @@ def main():
     join_filter = JoinFilter()
     try:
         join_filter.start()
-        join_filter.close()
     except middleware.MessageMiddlewareDisconnectedError:
         logging.error("Connection with middleware was lost")
         return 1
     except Exception as e:
         logging.error(e)
         return 2
+    finally:
+        try:
+            join_filter.close()
+        except Exception as e:
+            logging.error(f"Error during close: {e}")
     return 0
 
 
