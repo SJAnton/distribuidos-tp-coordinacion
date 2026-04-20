@@ -24,6 +24,8 @@ class JoinFilter:
         self.output_queue = middleware.MessageMiddlewareQueueRabbitMQ(
             MOM_HOST, OUTPUT_QUEUE
         )
+        self.done_aggregations_by_client = {}
+        self.tops_by_client = {}
 
     def handle_sigterm(self, signum, frame):
         logging.info("Received SIGTERM signal")
@@ -33,9 +35,21 @@ class JoinFilter:
             self._prev_sigterm_handler(signum, frame)
 
     def process_messsage(self, message, ack, nack):
-        logging.info("Received top")
         [fruit_top, client_id] = message_protocol.internal.deserialize(message)
-        self.output_queue.send(message_protocol.internal.serialize([fruit_top, client_id]))
+        top_by_client = self.tops_by_client.setdefault(client_id, [])
+        top_by_client.extend(fruit_top)
+
+        counter = self.done_aggregations_by_client.get(client_id, 0) + 1
+        self.done_aggregations_by_client[client_id] = counter
+
+        if counter == AGGREGATION_AMOUNT:
+            logging.info(f"Sending top {TOP_SIZE} to client {client_id}")
+            top_n = sorted(top_by_client, key=lambda x: x[1], reverse=True)[:TOP_SIZE]
+            self.output_queue.send(message_protocol.internal.serialize([top_n, client_id]))
+            if client_id in self.tops_by_client:
+                del self.tops_by_client[client_id]
+            if client_id in self.done_aggregations_by_client:
+                del self.done_aggregations_by_client[client_id]
         ack()
 
     def start(self):

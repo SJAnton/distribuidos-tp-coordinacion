@@ -118,14 +118,13 @@ class MessageMiddlewareExchangeRabbitMQ(MessageMiddlewareExchange):
         except pika.exceptions.AMQPConnectionError:
             raise MessageMiddlewareDisconnectedError()
 
-    def send(self, message):
+    def send(self, message, routing_key):
         try:
-            for routing_key in self.routing_keys:
-                self.channel.basic_publish(
-                    exchange=self.exchange_name,
-                    routing_key=routing_key,
-                    body=message,
-                )
+            self.channel.basic_publish(
+                exchange=self.exchange_name,
+                routing_key=routing_key,
+                body=message,
+            )
         except pika.exceptions.AMQPConnectionError:
             raise MessageMiddlewareDisconnectedError()
         except Exception:

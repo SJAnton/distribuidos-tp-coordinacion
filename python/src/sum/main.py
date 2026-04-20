@@ -4,6 +4,7 @@ import signal
 import threading
 
 from common import middleware, message_protocol, fruit_item
+from hashlib import md5
 
 ID = int(os.environ["ID"])
 MOM_HOST = os.environ["MOM_HOST"]
@@ -46,6 +47,9 @@ class SumFilter:
         if self._prev_sigterm_handler:
             self._prev_sigterm_handler(signum, frame)
 
+    def _get_aggregation_id(self, fruit):
+        return int.from_bytes(md5(fruit.encode()).digest(), "big") % AGGREGATION_AMOUNT
+
     def _process_data(self, fruit, amount, client_id):
         logging.info(f"Process data")
         amount_by_fruit = self.amount_by_client.setdefault(client_id, {})
@@ -57,16 +61,22 @@ class SumFilter:
         logging.info(f"Broadcasting data messages")
         amount_by_fruit = self.amount_by_client.get(client_id, {})
         for final_fruit_item in amount_by_fruit.values():
-            for data_output_exchange in self.data_output_exchanges:
-                data_output_exchange.send(
-                    message_protocol.internal.serialize(
-                        [final_fruit_item.fruit, final_fruit_item.amount, client_id]
-                    )
-                )
+            aggr_id = self._get_aggregation_id(final_fruit_item.fruit)
+            self.data_output_exchanges[aggr_id].send(
+                message_protocol.internal.serialize(
+                    [final_fruit_item.fruit, final_fruit_item.amount, client_id]
+                ),
+                f"{AGGREGATION_PREFIX}_{aggr_id}",
+            )
 
         logging.info(f"Broadcasting EOF message")
-        for data_output_exchange in self.data_output_exchanges:
-            data_output_exchange.send(message_protocol.internal.serialize([client_id]))
+        for i in range(AGGREGATION_AMOUNT):
+            self.data_output_exchanges[i].send(
+                message_protocol.internal.serialize([client_id]),
+                f"{AGGREGATION_PREFIX}_{i}",
+            )
+        if client_id in self.amount_by_client:
+            del self.amount_by_client[client_id]
 
 
     def process_data_messsage(self, message, ack, nack):
