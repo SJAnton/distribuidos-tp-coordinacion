@@ -42,7 +42,9 @@ class SumFilter:
     def handle_sigterm(self, signum, frame):
         logging.info("Received SIGTERM signal")
         self.input_queue.stop_consuming()
-        self.eof_input_queue.stop_consuming()
+        self.eof_input_queue.connection.add_callback_threadsafe(
+            self.eof_input_queue.stop_consuming
+        )
 
         if self._prev_sigterm_handler:
             self._prev_sigterm_handler(signum, frame)
@@ -109,9 +111,12 @@ class SumFilter:
             target=self.eof_input_queue.start_consuming,
             args=(self.process_eof_message,),
         )
+        logging.info("Starting eof_handler_thread...")
         eof_handler_thread.start()
         self.input_queue.start_consuming(self.process_data_messsage)
+        logging.info("Joining eof_handler_thread...")
         eof_handler_thread.join()
+        logging.info("eof_handler_thread joined")
 
     def close(self):
         self.input_queue.close()
