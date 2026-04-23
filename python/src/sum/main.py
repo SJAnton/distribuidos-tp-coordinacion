@@ -111,12 +111,9 @@ class SumFilter:
             target=self.eof_input_queue.start_consuming,
             args=(self.process_eof_message,),
         )
-        logging.info("Starting eof_handler_thread...")
         eof_handler_thread.start()
         self.input_queue.start_consuming(self.process_data_messsage)
-        logging.info("Joining eof_handler_thread...")
         eof_handler_thread.join()
-        logging.info("eof_handler_thread joined")
 
     def close(self):
         self.input_queue.close()
